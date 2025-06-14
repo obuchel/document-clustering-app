@@ -19,8 +19,30 @@ const EnhancedDocumentClusteringApp = () => {
     'nlmcategory=', 'abstracttext=', 'abstracttext', 'label=', 'label', '1', '2', '95', 
     '4', '3', '6', '5', '60', '20', '10', '2023', '2022', '8', '333', '584', '972', 
     '1140', '0', '1', '12', '30', '40', '25', '2011', '2016', '80', '2017', '100', 
-    '50', '15', '2015', "''", "{", "}", '2021', 'obj', 'endobj', 'stream', 'endstream'
+    '50', '15', '2015', "''", "{", "}", '2021', 'obj', 'endobj', 'stream', 'endstream',
+    
+    // ALL PDF METADATA TERMS FROM YOUR SAMPLE DATA:
+    'filter', 'encoding', 'winansiencoding', 'baseencoding', 'macromanencoding',
+    'description', 'pagenumber', 'lastmodified', 'version', 'linearized', 'openaction',
+    'dest', 'border', 'subsection', 'caption', 'producer', 'conformance', 'iccbased',
+    'indexed', 'trailer', 'application', 'shading', 'function', 'luminosity', 'infinity',
+    'reference', 'placement', 'sourceautocomputed', 'converted', 'registration',
+    'courier', 'identity', 'uity', 'process', 'action', 'leading', 'representation',
+    'gts_pdfxversion', 'header', 'sequence', 'progression', 'visualization',
+    
+    // ENCODING COMBINATIONS FROM YOUR SAMPLE:
+    'encoding winansiencoding', 'encoding macromanencoding', 'iccbased filter',
+    
+    // PDF NOISE PATTERNS FROM YOUR SAMPLE:
+    'qxed', 'xoer', 'deed', 'taed', 'ejer', 'aoed', 'bied', 'zved', 'qser', 'daer',
+    'pjued', 'boed', 'nfed', 'wger', 'zubaker', 'qinserted', 'gts', 'tter', 'exer',
+    'nter', 'pted', 'trapped', 'ged', 'ueed', 'kled', 'mer', 'ped',
+    
+    // DOCUMENT STRUCTURE TERMS:
+    'document', 'section', 'chapter', 'part', 'figure', 'table', 'content', 'text', 'page', 'paper', 'pdf'
   ];
+
+
 
   const preprocessText = (text) => {
     // Create regex pattern from metadata terms
@@ -30,8 +52,22 @@ const EnhancedDocumentClusteringApp = () => {
 
     let cleanedText = text
       .toLowerCase()
-      // Remove metadata terms
+      // Remove metadata terms first
       .replace(metadataPattern, ' ')
+      // Extra aggressive PDF filtering for the main culprits
+      .replace(/\bfilter\b/g, ' ')
+      .replace(/\bencoding\b/g, ' ')
+      .replace(/\bwinansiencoding\b/g, ' ')
+      .replace(/\bdescription\b/g, ' ')
+      .replace(/\bpagenumber\b/g, ' ')
+      .replace(/\blastmodified\b/g, ' ')
+      .replace(/\bversion\b/g, ' ')
+      .replace(/\bborder\b/g, ' ')
+      .replace(/\bproducer\b/g, ' ')
+      .replace(/\bindexed\b/g, ' ')
+      .replace(/\bshading\b/g, ' ')
+      .replace(/\bfunction\b/g, ' ')
+      .replace(/\bsequence\b/g, ' ')
       // Remove all numeric sequences
       .replace(/\b\d+\b/g, ' ')
       .replace(/\b0{2,}\b/g, ' ')
@@ -52,6 +88,13 @@ const EnhancedDocumentClusteringApp = () => {
         if (word.length < 2) return false;
         if (word.length === 2 && !/^(is|it|to|of|in|on|at|by|or|an|as|be|do|go|he|me|my|no|so|up|we|if)$/.test(word)) return false;
         if (word.length === 3 && !/^(the|and|for|are|but|not|you|all|can|had|her|was|one|our|out|day|get|has|him|his|how|man|new|now|old|see|two|way|who)$/.test(word)) return false;
+        
+        // Extra filter for PDF metadata that might slip through
+        if (['filter', 'encoding', 'winansiencoding', 'description', 'pagenumber', 'lastmodified', 
+             'version', 'border', 'producer', 'indexed', 'shading', 'function', 'sequence'].includes(word)) {
+          return false;
+        }
+        
         return true;
       })
       .join(' ')
@@ -288,93 +331,207 @@ const EnhancedDocumentClusteringApp = () => {
   };
 
   // Build hierarchical structure with subdivision (like your prepare_data.py)
-  const buildHierarchicalStructure = (documents, embeddings, level1Clusters, minClusterSize) => {
-    const clusterMap = new Map();
-    const noiseDocs = [];
+// Build hierarchical structure with deep subdivision
+// Build hierarchical structure with deep subdivision
+const buildHierarchicalStructure = (documents, embeddings, level1Clusters, minClusterSize) => {
+  const clusterMap = new Map();
+  const noiseDocs = [];
 
-    // Group documents by level 1 cluster
-    documents.forEach((doc, index) => {
-      const clusterId = level1Clusters[index];
-      if (clusterId === -1) {
-        noiseDocs.push({ doc, embedding: embeddings[index], index });
-      } else {
-        if (!clusterMap.has(clusterId)) {
-          clusterMap.set(clusterId, []);
-        }
-        clusterMap.get(clusterId).push({ doc, embedding: embeddings[index], index });
+  // Group documents by level 1 cluster
+  documents.forEach((doc, index) => {
+    const clusterId = level1Clusters[index];
+    if (clusterId === -1) {
+      noiseDocs.push({ doc, embedding: embeddings[index], index });
+    } else {
+      if (!clusterMap.has(clusterId)) {
+        clusterMap.set(clusterId, []);
       }
+      clusterMap.get(clusterId).push({ doc, embedding: embeddings[index], index });
+    }
+  });
+
+  const clusters = [];
+
+  // Process each level 1 cluster with deep recursion
+  Array.from(clusterMap.entries()).forEach(([clusterId, clusterData]) => {
+    const clusterDocs = clusterData.map(item => item.doc);
+    const clusterEmbeddings = clusterData.map(item => item.embedding);
+    
+    // Use recursive subdivision for deeper hierarchies
+    const deepSubClusters = recursiveSubdivision(
+      clusterDocs, 
+      clusterEmbeddings, 
+      minClusterSize, 
+      1, // Starting at level 1
+      `cluster_${clusterId}`,
+      documents
+    );
+    
+    clusters.push(deepSubClusters);
+  });
+
+  // Add noise documents as individual clusters
+  noiseDocs.forEach((item, index) => {
+    clusters.push({
+      id: `outlier_${index}`,
+      name: item.doc.name.replace(/\.[^/.]+$/, ""),
+      size: Object.values(item.doc.terms).reduce((a, b) => a + b, 0),
+      children: null,
+      documents: [item.doc],
+      level: 1
     });
+  });
 
-    const clusters = [];
+  if (clusters.length === 0) return null;
+  if (clusters.length === 1) return clusters[0];
 
-    // Process each level 1 cluster
-    Array.from(clusterMap.entries()).forEach(([clusterId, clusterData]) => {
-      const clusterDocs = clusterData.map(item => item.doc);
-      const clusterEmbeddings = clusterData.map(item => item.embedding);
-      
-      // If cluster is large, subdivide it (like your hierarchical approach)
-      if (clusterDocs.length >= 8) {
-        const subClusters = subdivideCluster(clusterDocs, clusterEmbeddings, minClusterSize);
-        
-        const mainCluster = {
-          id: `cluster_${clusterId}`,
-          name: generateClusterName(clusterDocs, documents),
-          size: clusterDocs.reduce((sum, doc) => sum + Object.values(doc.terms).reduce((a, b) => a + b, 0), 0),
-          children: subClusters,
-          documents: clusterDocs,
-          level: 1
-        };
-        
-        clusters.push(mainCluster);
-      } else {
-        // Small cluster - no subdivision needed
-        const cluster = {
-          id: `cluster_${clusterId}`,
-          name: generateClusterName(clusterDocs, documents),
-          size: clusterDocs.reduce((sum, doc) => sum + Object.values(doc.terms).reduce((a, b) => a + b, 0), 0),
-          children: clusterDocs.map((doc, idx) => ({
-            id: `doc_${clusterId}_${idx}`,
-            name: doc.name.replace(/\.[^/.]+$/, ""),
-            size: Object.values(doc.terms).reduce((a, b) => a + b, 0),
-            children: null,
-            documents: [doc],
-            level: 2
-          })),
-          documents: clusterDocs,
-          level: 1
-        };
-        
-        clusters.push(cluster);
-      }
-    });
-
-    // Add noise documents as individual clusters
-    noiseDocs.forEach((item, index) => {
-      clusters.push({
-        id: `outlier_${index}`,
-        name: item.doc.name.replace(/\.[^/.]+$/, ""),
-        size: Object.values(item.doc.terms).reduce((a, b) => a + b, 0),
-        children: null,
-        documents: [item.doc],
-        level: 1
-      });
-    });
-
-    if (clusters.length === 0) return null;
-    if (clusters.length === 1) return clusters[0];
-
-    return {
-      id: 'root',
-      name: 'Document Collection',
-      size: clusters.reduce((sum, cluster) => sum + cluster.size, 0),
-      children: clusters,
-      documents: documents,
-      level: 0
-    };
+  return {
+    id: 'root',
+    name: 'Document Collection',
+    size: clusters.reduce((sum, cluster) => sum + cluster.size, 0),
+    children: clusters,
+    documents: documents,
+    level: 0
   };
+};
+
+// Recursive subdivision for deeper hierarchies (up to 6 levels)
+const recursiveSubdivision = (clusterDocs, clusterEmbeddings, minClusterSize, currentLevel, parentId, allDocs) => {
+  const maxDepth = 6; // Allow up to 6 levels deep
+  const minDocsForSubdivision = Math.max(3, minClusterSize); // Minimum docs needed for subdivision
+  
+  // Base case: too few documents, too deep, or subdivision threshold not met
+  if (clusterDocs.length < minDocsForSubdivision || 
+      currentLevel >= maxDepth || 
+      clusterDocs.length < (currentLevel === 1 ? 6 : 4)) {
+    
+    // Create leaf nodes for individual documents
+    if (clusterDocs.length <= 3) {
+      return {
+        id: parentId,
+        name: generateClusterName(clusterDocs, allDocs),
+        size: clusterDocs.reduce((sum, doc) => sum + Object.values(doc.terms).reduce((a, b) => a + b, 0), 0),
+        children: clusterDocs.map((doc, idx) => ({
+          id: `${parentId}_doc_${idx}`,
+          name: doc.name.replace(/\.[^/.]+$/, ""),
+          size: Object.values(doc.terms).reduce((a, b) => a + b, 0),
+          children: null,
+          documents: [doc],
+          level: currentLevel + 1
+        })),
+        documents: clusterDocs,
+        level: currentLevel
+      };
+    } else {
+      // Medium-sized cluster - create one more level
+      return {
+        id: parentId,
+        name: generateClusterName(clusterDocs, allDocs),
+        size: clusterDocs.reduce((sum, doc) => sum + Object.values(doc.terms).reduce((a, b) => a + b, 0), 0),
+        children: clusterDocs.map((doc, idx) => ({
+          id: `${parentId}_doc_${idx}`,
+          name: doc.name.replace(/\.[^/.]+$/, ""),
+          size: Object.values(doc.terms).reduce((a, b) => a + b, 0),
+          children: null,
+          documents: [doc],
+          level: currentLevel + 1
+        })),
+        documents: clusterDocs,
+        level: currentLevel
+      };
+    }
+  }
+
+  // Calculate epsilon based on current level (tighter clustering at deeper levels)
+  const epsilon = Math.max(0.2, 0.6 - (currentLevel * 0.1));
+  const minPts = Math.max(2, Math.floor(minClusterSize / Math.pow(2, currentLevel - 1)));
+  
+  // Perform clustering at current level
+  const subClusters = dbscanClustering(clusterEmbeddings, epsilon, minPts);
+  const subClusterMap = new Map();
+  const subNoise = [];
+
+  // Group documents by sub-cluster
+  clusterDocs.forEach((doc, index) => {
+    const subClusterId = subClusters[index];
+    if (subClusterId === -1) {
+      subNoise.push({ doc, embedding: clusterEmbeddings[index] });
+    } else {
+      if (!subClusterMap.has(subClusterId)) {
+        subClusterMap.set(subClusterId, []);
+      }
+      subClusterMap.get(subClusterId).push({ 
+        doc, 
+        embedding: clusterEmbeddings[index] 
+      });
+    }
+  });
+
+  const children = [];
+
+  // Recursively process each sub-cluster
+  Array.from(subClusterMap.entries()).forEach(([subClusterId, subClusterData]) => {
+    const subClusterDocs = subClusterData.map(item => item.doc);
+    const subClusterEmbeddings = subClusterData.map(item => item.embedding);
+    
+    const childCluster = recursiveSubdivision(
+      subClusterDocs,
+      subClusterEmbeddings,
+      minClusterSize,
+      currentLevel + 1,
+      `${parentId}_sub_${subClusterId}`,
+      allDocs
+    );
+    
+    children.push(childCluster);
+  });
+
+  // Add noise documents as individual nodes
+  subNoise.forEach((item, index) => {
+    children.push({
+      id: `${parentId}_noise_${index}`,
+      name: item.doc.name.replace(/\.[^/.]+$/, ""),
+      size: Object.values(item.doc.terms).reduce((a, b) => a + b, 0),
+      children: null,
+      documents: [item.doc],
+      level: currentLevel + 1
+    });
+  });
+
+  // If no meaningful subdivision occurred, create document leaves
+  if (children.length <= 1 && clusterDocs.length > 1) {
+    return {
+      id: parentId,
+      name: generateClusterName(clusterDocs, allDocs),
+      size: clusterDocs.reduce((sum, doc) => sum + Object.values(doc.terms).reduce((a, b) => a + b, 0), 0),
+      children: clusterDocs.map((doc, idx) => ({
+        id: `${parentId}_doc_${idx}`,
+        name: doc.name.replace(/\.[^/.]+$/, ""),
+        size: Object.values(doc.terms).reduce((a, b) => a + b, 0),
+        children: null,
+        documents: [doc],
+        level: currentLevel + 1
+      })),
+      documents: clusterDocs,
+      level: currentLevel
+    };
+  }
+
+  return {
+    id: parentId,
+    name: generateClusterName(clusterDocs, allDocs),
+    size: clusterDocs.reduce((sum, doc) => sum + Object.values(doc.terms).reduce((a, b) => a + b, 0), 0),
+    children: children,
+    documents: clusterDocs,
+    level: currentLevel
+  };
+};
+
+// Recursive subdivision for deeper hierarchies (up to 6 levels)
+
 
   // Subdivide large clusters (inspired by your multi-level approach)
-  const subdivideCluster = (clusterDocs, clusterEmbeddings, minClusterSize) => {
+  /*const subdivideCluster = (clusterDocs, clusterEmbeddings, minClusterSize) => {
     // Apply secondary clustering with tighter parameters
     const subClusters = dbscanClustering(clusterEmbeddings, 0.5, Math.max(2, Math.floor(minClusterSize / 2)));
     
@@ -427,7 +584,7 @@ const EnhancedDocumentClusteringApp = () => {
     });
 
     return result;
-  };
+  };*/
 
   // Enhanced cluster naming with c-TF-IDF (from your approach)
   const generateClusterName = (clusterDocs, allDocs) => {
