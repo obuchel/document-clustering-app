@@ -1,15 +1,15 @@
 {
   "files": {
-    "main.css": "/document-clustering-app/static/css/main.1f81b7b8.css",
-    "main.js": "/document-clustering-app/static/js/main.30000245.js",
+    "main.css": "/document-clustering-app/static/css/main.e6c13ad2.css",
+    "main.js": "/document-clustering-app/static/js/main.2c48adf0.js",
     "static/js/453.75d8561b.chunk.js": "/document-clustering-app/static/js/453.75d8561b.chunk.js",
     "index.html": "/document-clustering-app/index.html",
-    "main.1f81b7b8.css.map": "/document-clustering-app/static/css/main.1f81b7b8.css.map",
-    "main.30000245.js.map": "/document-clustering-app/static/js/main.30000245.js.map",
+    "main.e6c13ad2.css.map": "/document-clustering-app/static/css/main.e6c13ad2.css.map",
+    "main.2c48adf0.js.map": "/document-clustering-app/static/js/main.2c48adf0.js.map",
     "453.75d8561b.chunk.js.map": "/document-clustering-app/static/js/453.75d8561b.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.1f81b7b8.css",
-    "static/js/main.30000245.js"
+    "static/css/main.e6c13ad2.css",
+    "static/js/main.2c48adf0.js"
   ]
 }
