@@ -2,42 +2,690 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="Web site created using create-react-app"
-    />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
+    <title>Global PDF Processor</title>
+    
+    <!-- Pyodide for global PDF processing -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    
+    <script type="text/javascript">
+      // Global state for PDF processing system
+      window.pdfProcessor = {
+        ready: false,
+        loading: false,
+        error: null,
+        pyodide: null,
+        pdfSupport: false
+      };
 
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React App</title>
+      // Initialize global PDF processing system
+      async function initGlobalPDFProcessor() {
+        if (window.pdfProcessor.loading || window.pdfProcessor.ready) {
+          return;
+        }
+
+        try {
+          console.log("🔄 Initializing Global PDF Processor...");
+          window.pdfProcessor.loading = true;
+          window.pdfProcessor.error = null;
+
+          // Load Pyodide with correct API
+          console.log("📦 Loading Pyodide...");
+          window.pdfProcessor.pyodide = await loadPyodide({
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/"
+          });
+
+          console.log("📚 Installing Python packages...");
+          // Install required packages using the correct API
+          await window.pdfProcessor.pyodide.loadPackage("micropip");
+          
+          // Try to install PDF processing packages with fallback
+          console.log("📦 Installing PDF processing packages...");
+          let installSuccess = false;
+          
+          try {
+            await window.pdfProcessor.pyodide.runPython(`
+import micropip
+print("📦 Attempting to install PyPDF2...")
+            `);
+            
+            // Try installing PyPDF2 with different versions
+            const versions = ['PyPDF2', 'PyPDF2==3.0.1', 'PyPDF2==2.12.1'];
+            
+            for (const version of versions) {
+              try {
+                console.log(`📦 Trying ${version}...`);
+                await window.pdfProcessor.pyodide.runPythonAsync(`
+await micropip.install(['${version}'])
+print("✅ ${version} installed successfully")
+                `);
+                installSuccess = true;
+                break;
+              } catch (e) {
+                console.warn(`⚠️ Failed to install ${version}:`, e.message);
+                continue;
+              }
+            }
+            
+            if (!installSuccess) {
+              console.warn("⚠️ Could not install PyPDF2, will use text-only processing");
+              // Set up minimal text processing without PDF support
+              await window.pdfProcessor.pyodide.runPython(`
+import json
+import re
+import string
+from collections import Counter
+
+# Minimal text processor without PDF support
+class SimpleTextProcessor:
+    def __init__(self):
+        self.stop_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+            'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 
+            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 
+            'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those'
+        }.union(set(string.punctuation))
+    
+    def simple_summarize(self, text, max_sentences=3):
+        if not text or len(text) < 200:
+            return text
+        
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
+        
+        if len(sentences) <= max_sentences:
+            return '. '.join(sentences) + '.'
+        
+        # Simple scoring
+        scored_sentences = []
+        for i, sentence in enumerate(sentences):
+            score = len(sentence.split())
+            if i == 0:
+                score *= 1.5
+            scored_sentences.append((score, sentence, i))
+        
+        top_sentences = sorted(scored_sentences, key=lambda x: x[0], reverse=True)[:max_sentences]
+        top_sentences = sorted(top_sentences, key=lambda x: x[2])
+        
+        return '. '.join([sent[1] for sent in top_sentences]) + '.'
+    
+    def extract_keywords(self, text, max_keywords=8):
+        # Simple word extraction
+        words = text.lower().split()
+        filtered_words = [w.strip('.,!?;:"()[]') for w in words if len(w) > 4]
+        filtered_words = [w for w in filtered_words if w not in self.stop_words and w.isalpha()]
+        word_freq = Counter(filtered_words)
+        
+        keyword_scores = []
+        for word, freq in word_freq.items():
+            score = freq
+            if len(word) > 6:
+                score *= 1.2
+            keyword_scores.append({'word': word, 'score': score, 'frequency': freq})
+        
+        return sorted(keyword_scores, key=lambda x: x['score'], reverse=True)[:max_keywords]
+
+# Create simple processor
+simple_processor = SimpleTextProcessor()
+
+def process_pdf_global(pdf_bytes):
+    return json.dumps({
+        'success': False,
+        'error': 'PDF processing not available - PyPDF2 installation failed',
+        'text': '',
+        'summary': '',
+        'keywords': [],
+        'processing_method': 'unavailable'
+    })
+
+def summarize_text_global(text, max_sentences=3):
+    return simple_processor.simple_summarize(text, max_sentences)
+
+def extract_keywords_global(text, max_keywords=8):
+    keywords = simple_processor.extract_keywords(text, max_keywords)
+    return json.dumps(keywords)
+
+import js
+js.processPDFGlobal = process_pdf_global
+js.summarizeTextGlobal = summarize_text_global
+js.extractKeywordsGlobal = extract_keywords_global
+
+print("⚡ Text processing ready (PDF support unavailable)")
+              `);
+            }
+          } catch (error) {
+            console.warn("⚠️ Package installation failed, setting up minimal processor", error);
+          }
+
+          console.log("🛠️ Setting up PDF processing functions...");
+          
+          // Only set up full PDF processing if PyPDF2 was installed successfully
+          if (installSuccess) {
+            const pythonCode = `
+import js
+import json
+import re
+import io
+import string
+from typing import Dict, Any, List
+import PyPDF2
+from collections import Counter
+
+class GlobalPDFExtractor:
+    def __init__(self):
+        self.stop_words = self._get_basic_stop_words()
+        
+    def _get_basic_stop_words(self):
+        """Basic English stop words for keyword extraction"""
+        return {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+            'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 
+            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 
+            'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those',
+            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 
+            'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their', 'from', 
+            'up', 'out', 'down', 'off', 'over', 'under', 'again', 'further', 
+            'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 
+            'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 
+            'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 
+            'than', 'too', 'very', 'just', 'now', 'also', 'time', 'way'
+        }.union(set(string.punctuation))
+    
+    def extract_text_from_pdf_bytes(self, pdf_bytes):
+        """Extract clean text from PDF bytes using PyPDF2"""
+        try:
+            # Ensure we have Python bytes, not JavaScript typed array or memoryview
+            if hasattr(pdf_bytes, 'to_py'):
+                pdf_bytes = pdf_bytes.to_py()
+            
+            # Convert memoryview to bytes if needed
+            if isinstance(pdf_bytes, memoryview):
+                pdf_bytes = bytes(pdf_bytes)
+                print(f"📋 Converted memoryview to bytes in extractor")
+            
+            # Create BytesIO object from bytes
+            pdf_file = io.BytesIO(pdf_bytes)
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            
+            extracted_text = ""
+            page_count = len(pdf_reader.pages)
+            
+            print(f"📄 Processing PDF with {page_count} pages...")
+            
+            for i, page in enumerate(pdf_reader.pages):
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        extracted_text += page_text + chr(10)  # Use chr(10) for newline
+                        print(f"✅ Processed page {i+1}/{page_count}")
+                except Exception as e:
+                    print(f"⚠️ Warning: Could not extract text from page {i+1}: {e}")
+                    continue
+            
+            if not extracted_text.strip():
+                return {
+                    'success': False,
+                    'error': 'No readable text found in PDF',
+                    'text': '',
+                    'char_count': 0,
+                    'word_count': 0
+                }
+            
+            # Clean the extracted text
+            cleaned_text = self._clean_text(extracted_text)
+            word_count = len(cleaned_text.split())
+            char_count = len(cleaned_text)
+            
+            print(f"📝 Extracted {char_count} characters, {word_count} words")
+            
+            return {
+                'success': True,
+                'text': cleaned_text,
+                'char_count': char_count,
+                'word_count': word_count,
+                'page_count': page_count
+            }
+            
+        except Exception as e:
+            error_msg = f"Error extracting PDF: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'text': '',
+                'char_count': 0,
+                'word_count': 0
+            }
+    
+    def _clean_text(self, text):
+        """Clean and normalize extracted text"""
+        # Remove excessive whitespace and normalize
+        cleaned = re.sub(r'\\s+', ' ', text)
+        cleaned = cleaned.strip()
+        
+        # Remove non-printable characters but keep basic punctuation
+        # Use simple ASCII range
+        cleaned = ''.join(c for c in cleaned if ord(c) >= 32 and ord(c) <= 126 or c == '\\n')
+        
+        # Normalize multiple spaces
+        cleaned = re.sub(r' +', ' ', cleaned)
+        
+        return cleaned
+    
+    def extract_keywords(self, text, max_keywords=10):
+        """Extract meaningful keywords from text"""
+        try:
+            # Use simple word splitting instead of complex regex
+            words = text.lower().split()
+            # Remove punctuation from words
+            cleaned_words = []
+            for word in words:
+                clean_word = ''.join(c for c in word if c.isalpha())
+                if len(clean_word) > 3 and clean_word not in self.stop_words:
+                    cleaned_words.append(clean_word)
+            
+            # Count word frequencies
+            word_freq = Counter(cleaned_words)
+            
+            # Score keywords
+            keyword_scores = []
+            for word, freq in word_freq.items():
+                score = freq
+                
+                # Boost technical/academic terms
+                tech_terms = ['research', 'analys', 'study', 'method', 'algorithm', 'system', 'approach', 'model', 'data', 'information']
+                if any(term in word for term in tech_terms):
+                    score *= 2.0
+                
+                # Boost longer terms
+                if len(word) > 6:
+                    score *= 1.2
+                
+                keyword_scores.append({
+                    'word': word,
+                    'score': score,
+                    'frequency': freq
+                })
+            
+            return sorted(keyword_scores, key=lambda x: x['score'], reverse=True)[:max_keywords]
+            
+        except Exception as e:
+            print(f"Keyword extraction error: {e}")
+            return []
+    
+    def simple_summarize(self, text, max_sentences=3):
+        """Create a simple extractive summary"""
+        if not text or len(text) < 200:
+            return text
+        
+        try:
+            # Simple sentence splitting
+            sentences = re.split(r'[.!?]+', text)
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
+            
+            if len(sentences) <= max_sentences:
+                return '. '.join(sentences) + '.'
+            
+            # Simple scoring based on sentence length and position
+            scored_sentences = []
+            for i, sentence in enumerate(sentences):
+                score = len(sentence.split())  # Word count as base score
+                
+                # Boost first and last sentences
+                if i == 0:
+                    score *= 1.5
+                elif i == len(sentences) - 1:
+                    score *= 1.2
+                
+                # Boost sentences with keywords
+                sentence_lower = sentence.lower()
+                keywords = ['research', 'analysis', 'study', 'conclusion', 'result', 'method', 'approach']
+                keyword_boost = sum(1 for keyword in keywords if keyword in sentence_lower)
+                score += keyword_boost * 0.5
+                
+                scored_sentences.append((score, sentence, i))
+            
+            # Select top sentences and maintain order
+            top_sentences = sorted(scored_sentences, key=lambda x: x[0], reverse=True)[:max_sentences]
+            top_sentences = sorted(top_sentences, key=lambda x: x[2])  # Restore original order
+            
+            summary = '. '.join([sent[1] for sent in top_sentences]) + '.'
+            return summary
+            
+        except Exception as e:
+            print(f"Summarization error: {e}")
+            # Fallback: return first portion
+            return text[:1000] + "..." if len(text) > 1000 else text
+
+# Create global instance
+pdf_extractor = GlobalPDFExtractor()
+
+def process_pdf_global(pdf_bytes):
+    """Main global function to process PDF bytes and return comprehensive results"""
+    try:
+        print("🐍 Starting PDF processing with Python...")
+        print(f"📊 Received {len(pdf_bytes)} bytes")
+        
+        # Convert JavaScript Uint8Array to Python bytes properly
+        if hasattr(pdf_bytes, 'to_py'):
+            # Pyodide typed array - convert to Python
+            pdf_bytes_converted = pdf_bytes.to_py()
+            print(f"📋 Converted to Python: {type(pdf_bytes_converted)}")
+        else:
+            # Already Python-compatible
+            pdf_bytes_converted = pdf_bytes
+            print(f"📋 Using as-is: {type(pdf_bytes_converted)}")
+        
+        # Convert memoryview to bytes if needed
+        if isinstance(pdf_bytes_converted, memoryview):
+            pdf_bytes_py = bytes(pdf_bytes_converted)
+            print(f"📋 Converted memoryview to bytes: {type(pdf_bytes_py)}")
+        else:
+            pdf_bytes_py = pdf_bytes_converted
+        
+        # Now we can safely slice
+        first_20 = list(pdf_bytes_py[:20]) if len(pdf_bytes_py) >= 20 else list(pdf_bytes_py)
+        print(f"📋 First 20 bytes: {first_20}")
+        
+        # Check if this looks like a PDF
+        pdf_header = pdf_bytes_py[:4] if len(pdf_bytes_py) >= 4 else pdf_bytes_py
+        print(f"📋 PDF header: {pdf_header}")
+        print(f"📋 PDF header type: {type(pdf_header)}")
+        
+        if not pdf_header.startswith(b'%PDF'):
+            print("❌ Not a valid PDF - missing PDF header")
+            return json.dumps({
+                'success': False,
+                'error': 'Invalid PDF file - missing PDF header',
+                'text': '',
+                'summary': '',
+                'keywords': [],
+                'processing_method': 'python_pypdf2'
+            })
+        
+        print("✅ Valid PDF header detected!")
+        
+        # Extract text from PDF using the converted bytes
+        extraction_result = pdf_extractor.extract_text_from_pdf_bytes(pdf_bytes_py)
+        print(f"📋 Extraction result: {extraction_result}")
+        
+        if not extraction_result['success']:
+            print(f"❌ PDF extraction failed: {extraction_result['error']}")
+            return json.dumps(extraction_result)
+        
+        text = extraction_result['text']
+        print(f"📝 Extracted text length: {len(text)}")
+        print(f"📝 First 100 chars: {text[:100]}")
+        
+        # Generate summary
+        summary = pdf_extractor.simple_summarize(text, 3)
+        print(f"📄 Summary length: {len(summary)}")
+        
+        # Extract keywords
+        keywords = pdf_extractor.extract_keywords(text, 8)
+        print(f"🔑 Extracted {len(keywords)} keywords")
+        
+        result = {
+            'success': True,
+            'text': text,
+            'summary': summary,
+            'keywords': keywords,
+            'char_count': extraction_result['char_count'],
+            'word_count': extraction_result['word_count'],
+            'page_count': extraction_result['page_count'],
+            'processing_method': 'python_pypdf2'
+        }
+        
+        print("✅ PDF processing completed successfully")
+        return json.dumps(result)
+        
+    except Exception as e:
+        print(f"❌ PDF processing failed with exception: {e}")
+        print(f"❌ Exception type: {type(e)}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
+        
+        error_result = {
+            'success': False,
+            'error': str(e),
+            'text': '',
+            'summary': '',
+            'keywords': [],
+            'processing_method': 'python_pypdf2'
+        }
+        return json.dumps(error_result)
+
+def summarize_text_global(text, max_sentences=3):
+    """Global function for text summarization"""
+    try:
+        return pdf_extractor.simple_summarize(text, max_sentences)
+    except Exception as e:
+        print(f"Summarization error: {e}")
+        return text[:1000] + "..." if len(text) > 1000 else text
+
+def extract_keywords_global(text, max_keywords=8):
+    """Global function for keyword extraction"""
+    try:
+        keywords = pdf_extractor.extract_keywords(text, max_keywords)
+        return json.dumps(keywords)
+    except Exception as e:
+        print(f"Keyword extraction error: {e}")
+        return json.dumps([])
+
+# Expose functions to JavaScript
+js.processPDFGlobal = process_pdf_global
+js.summarizeTextGlobal = summarize_text_global
+js.extractKeywordsGlobal = extract_keywords_global
+
+print("🎉 Global PDF Processor initialized successfully!")
+print("Available functions:")
+print("  - processPDFGlobal(pdf_bytes)")
+print("  - summarizeTextGlobal(text, max_sentences)")
+print("  - extractKeywordsGlobal(text, max_keywords)")
+            `;
+
+            await window.pdfProcessor.pyodide.runPython(pythonCode);
+          }
+
+          // Mark as ready
+          window.pdfProcessor.ready = true;
+          window.pdfProcessor.loading = false;
+          window.pdfProcessor.pdfSupport = installSuccess;
+          
+          if (installSuccess) {
+            console.log("✅ Global PDF Processor is ready with full PDF support!");
+          } else {
+            console.log("✅ Global PDF Processor is ready with text processing only!");
+          }
+
+          // Dispatch ready event
+          window.dispatchEvent(new CustomEvent('globalPDFProcessorReady', {
+            detail: { ready: true, timestamp: Date.now() }
+          }));
+
+        } catch (error) {
+          console.error("❌ Failed to initialize Global PDF Processor:", error);
+          window.pdfProcessor.ready = false;
+          window.pdfProcessor.loading = false;
+          window.pdfProcessor.error = error.message;
+
+          // Dispatch error event
+          window.dispatchEvent(new CustomEvent('globalPDFProcessorError', {
+            detail: { error: error.message, timestamp: Date.now() }
+          }));
+        }
+      }
+
+      // Global functions for React components to use
+      window.processFileWithPython = async function(fileArrayBuffer) {
+        if (!window.pdfProcessor.ready) {
+          throw new Error('Global PDF Processor not ready');
+        }
+
+        try {
+          // Convert ArrayBuffer to Uint8Array for Python
+          const uint8Array = new Uint8Array(fileArrayBuffer);
+          
+          // Use the correct underscore name
+          const processPDFFunc = window.pdfProcessor.pyodide.globals.get('process_pdf_global');
+          
+          if (!processPDFFunc) {
+            throw new Error('process_pdf_global function not found in Python globals');
+          }
+          
+          // Call the Python function
+          const resultJson = processPDFFunc(uint8Array);
+          const result = JSON.parse(resultJson);
+          
+          return result;
+        } catch (error) {
+          console.error('Error in processFileWithPython:', error);
+          throw error;
+        }
+      };
+
+      window.summarizeTextWithPython = async function(text, maxSentences = 3) {
+        if (!window.pdfProcessor.ready) {
+          throw new Error('Global PDF Processor not ready');
+        }
+
+        try {
+          // Use the correct underscore name
+          const summarizeFunc = window.pdfProcessor.pyodide.globals.get('summarize_text_global');
+          
+          if (!summarizeFunc) {
+            throw new Error('summarize_text_global function not found in Python globals');
+          }
+          
+          const summary = summarizeFunc(text, maxSentences);
+          return summary;
+        } catch (error) {
+          console.error('Error in summarizeTextWithPython:', error);
+          throw error;
+        }
+      };
+
+      window.extractKeywordsWithPython = async function(text, maxKeywords = 8) {
+        if (!window.pdfProcessor.ready) {
+          throw new Error('Global PDF Processor not ready');
+        }
+
+        try {
+          // Use the correct underscore name
+          const extractFunc = window.pdfProcessor.pyodide.globals.get('extract_keywords_global');
+          
+          if (!extractFunc) {
+            throw new Error('extract_keywords_global function not found in Python globals');
+          }
+          
+          const keywordsJson = extractFunc(text, maxKeywords);
+          const keywords = JSON.parse(keywordsJson);
+          return keywords;
+        } catch (error) {
+          console.error('Error in extractKeywordsWithPython:', error);
+          throw error;
+        }
+      };
+
+      // Status check functions for React components
+      window.getPyodideStatus = function() {
+        return {
+          ready: window.pdfProcessor.ready,
+          loading: window.pdfProcessor.loading,
+          error: window.pdfProcessor.error,
+          pdfSupport: window.pdfProcessor.pdfSupport || false
+        };
+      };
+
+      window.isPyodideReady = function() {
+        return window.pdfProcessor.ready === true;
+      };
+
+      // Initialize when DOM is loaded
+      document.addEventListener('DOMContentLoaded', function() {
+        console.log("🚀 Starting Global PDF Processor initialization...");
+        // Add a small delay to ensure everything is loaded
+        setTimeout(() => {
+          initGlobalPDFProcessor();
+        }, 500);
+      });
+
+      // Also try to initialize if DOM is already loaded
+      if (document.readyState === 'loading') {
+        // DOM is still loading, wait for DOMContentLoaded
+      } else {
+        // DOM is already loaded, initialize now
+        console.log("🚀 DOM already loaded, starting Global PDF Processor...");
+        setTimeout(() => {
+          initGlobalPDFProcessor();
+        }, 500);
+      }
+
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
+    
+    <!-- Status indicator for debugging -->
+    <div id="pdf-processor-status" style="position: fixed; bottom: 10px; right: 10px; padding: 8px 12px; background: #f3f4f6; border-radius: 6px; font-size: 12px; font-family: monospace; z-index: 9999; display: none;">
+      PDF Processor: <span id="status-text">Loading...</span>
+    </div>
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
+    <script>
+      // Update status indicator
+      function updateStatusIndicator() {
+        const statusDiv = document.getElementById('pdf-processor-status');
+        const statusText = document.getElementById('status-text');
+        
+        if (statusDiv && statusText) {
+          const status = window.getPyodideStatus();
+          
+          if (status.loading) {
+            statusText.textContent = 'Loading...';
+            statusDiv.style.background = '#fef3c7';
+            statusDiv.style.color = '#92400e';
+          } else if (status.ready) {
+            if (status.pdfSupport) {
+              statusText.textContent = 'Ready 🐍📄';
+            } else {
+              statusText.textContent = 'Ready 🐍⚡';
+            }
+            statusDiv.style.background = '#dcfce7';
+            statusDiv.style.color = '#166534';
+            
+            // Hide after 3 seconds when ready
+            setTimeout(() => {
+              statusDiv.style.display = 'none';
+            }, 3000);
+          } else if (status.error) {
+            statusText.textContent = 'Error ❌';
+            statusDiv.style.background = '#fee2e2';
+            statusDiv.style.color = '#dc2626';
+          }
+          
+          statusDiv.style.display = 'block';
+        }
+      }
 
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
+      // Listen for status changes
+      window.addEventListener('globalPDFProcessorReady', updateStatusIndicator);
+      window.addEventListener('globalPDFProcessorError', updateStatusIndicator);
+      
+      // Check status periodically during loading
+      const statusCheck = setInterval(() => {
+        const status = window.getPyodideStatus();
+        updateStatusIndicator();
+        
+        if (status.ready || status.error) {
+          clearInterval(statusCheck);
+        }
+      }, 1000);
+
+      // Show status indicator initially
+      document.addEventListener('DOMContentLoaded', () => {
+        updateStatusIndicator();
+      });
+    </script>
   </body>
 </html>
