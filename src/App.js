@@ -66,11 +66,10 @@ const BertopicStyleDocumentClustering = () => {
     };
   }, []);
 
-  // LIGHTWEIGHT TEXT SUMMARIZATION (fallback when Python not available)
-  const lightweightSummarization = (text, maxSentences = 8) => {
+  // IMPROVED TEXT SUMMARIZATION - Focus on distinctive terms
+  const lightweightSummarization = (text, maxSentences = 10) => {
     if (!text || text.length < 500) return text;
 
-    // Split into sentences
     const sentences = text
       .replace(/([.!?])\s*(?=[A-Z])/g, "$1|")
       .split("|")
@@ -79,39 +78,53 @@ const BertopicStyleDocumentClustering = () => {
 
     if (sentences.length <= maxSentences) return sentences.join(' ');
 
-    // Enhanced scoring for abstract-style summaries
-    const academicKeywords = ['research', 'analysis', 'study', 'method', 'result', 'conclusion', 'approach', 'findings', 'objective', 'demonstrate', 'significant', 'important'];
+    // BETTER KEYWORD SCORING - Focus on distinguishing terms
+    const distinctiveKeywords = [
+      'algorithm', 'framework', 'architecture', 'protocol', 'implementation', 
+      'design', 'optimization', 'neural', 'machine', 'deep', 'distributed',
+      'quantum', 'blockchain', 'security', 'encryption', 'database', 'network',
+      'software', 'hardware', 'system', 'performance', 'scalability', 'model',
+      'classification', 'regression', 'clustering', 'detection', 'prediction'
+    ];
     
+    // AVOID generic academic terms that appear everywhere
+    const genericTerms = ['research', 'study', 'analysis', 'paper', 'work', 'investigation'];
+
     const scoredSentences = sentences.map((sentence, index) => {
       let score = 0;
-      
-      // Position score (abstract structure)
-      if (index === 0) score += 1.8; // First sentence often contains main point
-      else if (index < sentences.length * 0.2) score += 1.5; // Early sentences - context
-      else if (index > sentences.length * 0.8) score += 1.6; // Late sentences - conclusions
-      else score += 1.0;
-      
-      // Academic keyword score
       const lowerSentence = sentence.toLowerCase();
-      academicKeywords.forEach(keyword => {
-        if (lowerSentence.includes(keyword)) score += 0.3;
+      
+      // Position scoring (less aggressive)
+      if (index === 0) score += 1.2;
+      else if (index < sentences.length * 0.2) score += 1.0;
+      else if (index > sentences.length * 0.8) score += 1.1;
+      else score += 0.8;
+      
+      // BOOST distinctive technical terms
+      distinctiveKeywords.forEach(keyword => {
+        if (lowerSentence.includes(keyword)) score += 1.5;
       });
       
-      // Length score (prefer substantial sentences for abstracts)
-      const wordCount = sentence.split(' ').length;
-      if (wordCount >= 15 && wordCount <= 35) score += 0.5;
-      else if (wordCount > 35) score += 0.2;
+      // PENALIZE generic terms
+      genericTerms.forEach(keyword => {
+        if (lowerSentence.includes(keyword)) score -= 0.5;
+      });
       
-      // Structure indicators
-      if (lowerSentence.includes('this paper') || lowerSentence.includes('this study') || 
-          lowerSentence.includes('we present') || lowerSentence.includes('our findings')) {
-        score += 0.4;
+      // Boost sentences with numbers/percentages (often contain results)
+      if (/\d+%|\d+\.\d+/.test(sentence)) score += 0.8;
+      
+      // Boost sentences with proper nouns (specific methods/systems)
+      const properNouns = sentence.match(/\b[A-Z][a-z]+\b/g) || [];
+      score += properNouns.length * 0.3;
+      
+      // Boost sentences with technical patterns
+      if (/\b(using|based on|we propose|we present|our approach)\b/i.test(sentence)) {
+        score += 0.7;
       }
       
       return { sentence, score, index };
     });
 
-    // Select top sentences and maintain order
     const topSentences = scoredSentences
       .sort((a, b) => b.score - a.score)
       .slice(0, maxSentences)
@@ -133,7 +146,7 @@ const BertopicStyleDocumentClustering = () => {
       return words;
     });
 
-    const vocabArray = Array.from(vocabulary).slice(0, 300); // Limit vocab size
+    const vocabArray = Array.from(vocabulary).slice(0, 1500); // BIGGER vocabulary for better discrimination
 
     // Create TF-IDF-like embeddings with semantic enhancements
     const embeddings = processedSentences.map(words => {
@@ -216,19 +229,22 @@ const BertopicStyleDocumentClustering = () => {
     ]);
   };
 
-  // BERTOPIC-STYLE DENSITY CLUSTERING
+  // BERTOPIC-STYLE DENSITY CLUSTERING WITH STRICTER PARAMETERS
   const performDensityClustering = (embeddings, numDocs) => {
-    // Dynamic parameters based on document count
+    // MUCH stricter parameters for better separation
     let minClusterSize, eps;
-    if (numDocs < 20) {
+    if (numDocs < 10) {
       minClusterSize = 2;
-      eps = 0.5;
+      eps = 0.25;
+    } else if (numDocs < 30) {
+      minClusterSize = 2;
+      eps = 0.15;  // Stricter!
     } else if (numDocs < 100) {
       minClusterSize = 3;
-      eps = 0.4;
+      eps = 0.12;  // Even stricter!
     } else {
-      minClusterSize = Math.max(4, Math.floor(numDocs * 0.05));
-      eps = 0.3;
+      minClusterSize = Math.max(3, Math.floor(numDocs * 0.03));
+      eps = 0.08;  // Very strict for large collections
     }
 
     const n = embeddings.length;
@@ -287,15 +303,137 @@ const BertopicStyleDocumentClustering = () => {
     return clusters;
   };
 
+  // GENERATE SPECIFIC LABELS FOR OUTLIER DOCUMENTS - GENERIC ALGORITHM
+  const generateSpecificOutlierLabel = (document) => {
+    const content = document.content.toLowerCase();
+    const keywords = extractDocumentKeywords(document.content);
+    
+    // Extract top meaningful keywords (avoid generic terms)
+    const meaningfulKeywords = keywords
+      .filter(k => k.word.length > 4 && k.score > 1) // Only significant keywords
+      .slice(0, 3)
+      .map(k => k.word.charAt(0).toUpperCase() + k.word.slice(1));
+    
+    // Document type detection (universal patterns)
+    const documentTypePatterns = {
+      'Literature Review': ['review', 'survey', 'literature', 'systematic review', 'meta-analysis'],
+      'Tutorial': ['tutorial', 'guide', 'how to', 'step by step', 'introduction to', 'getting started'],
+      'Case Study': ['case study', 'case analysis', 'real world', 'practical application', 'implementation'],
+      'Technical Report': ['report', 'technical report', 'findings', 'results', 'evaluation'],
+      'Methodology': ['methodology', 'approach', 'method', 'technique', 'procedure', 'framework'],
+      'Analysis': ['analysis', 'examination', 'investigation', 'assessment', 'evaluation'],
+      'Comparison': ['comparison', 'comparative', 'versus', 'benchmarking', 'performance comparison'],
+      'Proposal': ['proposal', 'we propose', 'new approach', 'novel method', 'contribution'],
+      'Experimental Study': ['experiment', 'empirical', 'experimental', 'testing', 'validation']
+    };
+    
+    // Check for document type patterns
+    for (const [docType, patterns] of Object.entries(documentTypePatterns)) {
+      if (patterns.some(pattern => content.includes(pattern))) {
+        if (meaningfulKeywords.length > 0) {
+          return `${meaningfulKeywords[0]} ${docType}`;
+        }
+        return docType;
+      }
+    }
+    
+    // Generate label based on content characteristics
+    if (meaningfulKeywords.length >= 2) {
+      // Check if keywords suggest a specific type of work
+      const firstKeyword = meaningfulKeywords[0];
+      const secondKeyword = meaningfulKeywords[1];
+      
+      // Look for common academic/business patterns
+      if (content.includes('algorithm') || content.includes('method')) {
+        return `${firstKeyword} & ${secondKeyword} Methods`;
+      } else if (content.includes('system') || content.includes('platform')) {
+        return `${firstKeyword} & ${secondKeyword} Systems`;
+      } else if (content.includes('theory') || content.includes('theoretical')) {
+        return `${firstKeyword} & ${secondKeyword} Theory`;
+      } else if (content.includes('application') || content.includes('practical')) {
+        return `${firstKeyword} & ${secondKeyword} Applications`;
+      } else if (content.includes('design') || content.includes('development')) {
+        return `${firstKeyword} & ${secondKeyword} Design`;
+      } else if (content.includes('optimization') || content.includes('improvement')) {
+        return `${firstKeyword} & ${secondKeyword} Optimization`;
+      } else {
+        return `${firstKeyword} & ${secondKeyword} Study`;
+      }
+    } else if (meaningfulKeywords.length === 1) {
+      const keyword = meaningfulKeywords[0];
+      
+      // Single keyword with context
+      if (content.includes('research') || content.includes('investigation')) {
+        return `${keyword} Research`;
+      } else if (content.includes('development') || content.includes('implementation')) {
+        return `${keyword} Development`;
+      } else if (content.includes('analysis') || content.includes('examination')) {
+        return `${keyword} Analysis`;
+      } else if (content.includes('design') || content.includes('architecture')) {
+        return `${keyword} Design`;
+      } else {
+        return `${keyword} Study`;
+      }
+    }
+    
+    // Content-based classification (generic patterns)
+    if (content.includes('business') || content.includes('management') || content.includes('strategy')) {
+      return 'Business Document';
+    } else if (content.includes('legal') || content.includes('law') || content.includes('regulation')) {
+      return 'Legal Document';
+    } else if (content.includes('medical') || content.includes('health') || content.includes('clinical')) {
+      return 'Medical Document';
+    } else if (content.includes('education') || content.includes('learning') || content.includes('teaching')) {
+      return 'Educational Material';
+    } else if (content.includes('technical') || content.includes('engineering') || content.includes('specification')) {
+      return 'Technical Documentation';
+    } else if (content.includes('policy') || content.includes('guideline') || content.includes('standard')) {
+      return 'Policy Document';
+    } else if (content.includes('manual') || content.includes('instruction') || content.includes('procedure')) {
+      return 'Instructional Document';
+    }
+    
+    // Length-based classification
+    const wordCount = document.content.split(/\s+/).length;
+    if (wordCount < 500) {
+      return 'Brief Document';
+    } else if (wordCount > 5000) {
+      return 'Comprehensive Document';
+    }
+    
+    // Final fallback - try to extract any meaningful term
+    const allWords = content.split(/\s+/)
+      .filter(word => word.length > 6 && !stopWords.has(word))
+      .map(word => word.replace(/[^\w]/g, ''))
+      .filter(word => word.length > 6);
+    
+    if (allWords.length > 0) {
+      const uniqueWords = [...new Set(allWords)];
+      const bestWord = uniqueWords[0].charAt(0).toUpperCase() + uniqueWords[0].slice(1);
+      return `${bestWord} Document`;
+    }
+    
+    return 'Specialized Document';
+  };
+
   // BUILD BERTOPIC-STYLE HIERARCHY WITH ENHANCED LABELING
   const buildBertopicHierarchy = (documents, summaries, clusters, embeddings) => {
     const clusterMap = new Map();
     const outliers = [];
 
+    // Generate C-TF-IDF inspired cluster labels (similar to your hdb2.py approach)
+    const clusterLabels = generateCTFIDFClusterLabels(documents, clusters, summaries);
+    console.log('🏷️ Generated cluster labels:', Object.fromEntries(clusterLabels));
+
     // Group documents by cluster and calculate confidence scores
     documents.forEach((doc, index) => {
       const clusterId = clusters[index];
       const confidence = calculateClusterConfidence(embeddings[index], embeddings, clusters, clusterId);
+      
+      // Generate specific label for outliers, C-TF-IDF label for clusters
+      const topicLabel = clusterId === -1 ? 
+        generateSpecificOutlierLabel(doc) : 
+        (clusterLabels.get(clusterId) || `Topic ${clusterId}`);
       
       const enhancedDoc = { 
         ...doc, 
@@ -303,7 +441,7 @@ const BertopicStyleDocumentClustering = () => {
         embedding: embeddings[index],
         clusterId: clusterId,
         confidence: confidence,
-        topicLabel: clusterId === -1 ? 'Outlier' : `Topic ${clusterId}`
+        topicLabel: topicLabel
       };
 
       if (clusterId === -1) {
@@ -315,7 +453,7 @@ const BertopicStyleDocumentClustering = () => {
           documents: [enhancedDoc],
           level: 1,
           topicInfo: {
-            label: 'Outlier Document',
+            label: enhancedDoc.topicLabel,
             keywords: extractDocumentKeywords(doc.content),
             confidence: 0.0,
             color: '#6b7280'
@@ -334,7 +472,7 @@ const BertopicStyleDocumentClustering = () => {
 
     // Create clusters with enhanced topic information
     Array.from(clusterMap.entries()).forEach(([clusterId, clusterDocs]) => {
-      const topicInfo = generateEnhancedTopicInfo(clusterDocs, clusterId);
+      const topicInfo = generateEnhancedTopicInfo(clusterDocs, clusterId, clusterLabels);
       const clusterName = topicInfo.label;
       const totalSize = clusterDocs.reduce((sum, doc) => sum + doc.content.length, 0);
       const color = topicColors[clusterId % topicColors.length];
@@ -414,27 +552,131 @@ const BertopicStyleDocumentClustering = () => {
     return Math.round(avgSimilarity * 100) / 100; // Round to 2 decimal places
   };
 
-  // GENERATE ENHANCED TOPIC INFORMATION
-  const generateEnhancedTopicInfo = (clusterDocs, clusterId) => {
+  // C-TF-IDF INSPIRED CLUSTER LABELING (similar to your hdb2.py approach)
+  const generateCTFIDFClusterLabels = (documents, clusters, summaries) => {
+    const clusterLabels = new Map();
+    const uniqueClusters = [...new Set(clusters)].filter(c => c !== -1);
+    
+    // Create cluster-specific documents
+    const clusterDocs = new Map();
+    documents.forEach((doc, index) => {
+      const clusterId = clusters[index];
+      if (clusterId !== -1) {
+        if (!clusterDocs.has(clusterId)) {
+          clusterDocs.set(clusterId, []);
+        }
+        clusterDocs.set(clusterId, [...clusterDocs.get(clusterId), summaries[index] || doc.content]);
+      }
+    });
+    
+    // For each cluster, find distinctive terms
+    uniqueClusters.forEach(clusterId => {
+      const clusterTexts = clusterDocs.get(clusterId);
+      const otherTexts = [];
+      
+      // Collect all other cluster texts for comparison
+      clusterDocs.forEach((texts, otherClusterId) => {
+        if (otherClusterId !== clusterId) {
+          otherTexts.push(...texts);
+        }
+      });
+      
+      // Extract distinctive keywords for this cluster vs others
+      const clusterKeywords = extractDistinctiveKeywords(clusterTexts, otherTexts);
+      
+      // Generate label from top keywords
+      if (clusterKeywords.length >= 2) {
+        const topTerms = clusterKeywords.slice(0, 2).map(k => 
+          k.word.charAt(0).toUpperCase() + k.word.slice(1)
+        );
+        clusterLabels.set(clusterId, `${topTerms.join(' & ')} Cluster`);
+      } else if (clusterKeywords.length === 1) {
+        const term = clusterKeywords[0].word.charAt(0).toUpperCase() + clusterKeywords[0].word.slice(1);
+        clusterLabels.set(clusterId, `${term} Research`);
+      } else {
+        clusterLabels.set(clusterId, `Topic ${clusterId}`);
+      }
+    });
+    
+    return clusterLabels;
+  };
+
+  // EXTRACT DISTINCTIVE KEYWORDS (C-TF-IDF inspired)
+  const extractDistinctiveKeywords = (clusterTexts, otherTexts) => {
+    const clusterText = clusterTexts.join(' ').toLowerCase();
+    const otherText = otherTexts.join(' ').toLowerCase();
+    
+    // Get word frequencies for cluster and others
+    const clusterWords = clusterText
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 3 && !stopWords.has(word));
+    
+    const otherWords = otherText
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 3 && !stopWords.has(word));
+    
+    // Count frequencies
+    const clusterFreq = {};
+    const otherFreq = {};
+    
+    clusterWords.forEach(word => {
+      clusterFreq[word] = (clusterFreq[word] || 0) + 1;
+    });
+    
+    otherWords.forEach(word => {
+      otherFreq[word] = (otherFreq[word] || 0) + 1;
+    });
+    
+    // Calculate C-TF-IDF like scores (cluster frequency vs other frequency)
+    const distinctiveScores = Object.entries(clusterFreq).map(([word, clusterCount]) => {
+      const otherCount = otherFreq[word] || 0;
+      const clusterSize = clusterWords.length;
+      const otherSize = otherWords.length;
+      
+      // Normalize frequencies
+      const clusterTF = clusterCount / clusterSize;
+      const otherTF = otherCount / otherSize;
+      
+      // C-TF-IDF inspired score: high in cluster, low in others
+      const distinctiveness = clusterTF / (otherTF + 0.01); // Add small constant to avoid division by zero
+      
+      return {
+        word,
+        score: distinctiveness * clusterCount, // Weight by raw frequency too
+        clusterFreq: clusterCount,
+        otherFreq: otherCount
+      };
+    });
+    
+    return distinctiveScores
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+  };
+
+  // GENERATE ENHANCED TOPIC INFORMATION WITH C-TF-IDF
+  const generateEnhancedTopicInfo = (clusterDocs, clusterId, clusterLabels) => {
     const allText = clusterDocs.map(doc => doc.summary || doc.content).join(' ');
     const keywords = extractDocumentKeywords(allText);
     
-    // Generate descriptive topic label
-    const topKeywords = keywords.slice(0, 3).map(k => k.word);
-    const label = topKeywords.length > 0 ? 
-      `${topKeywords.join(', ')} Research` : 
-      `Topic ${clusterId}`;
+    // Use C-TF-IDF label if available, otherwise fall back to keyword-based
+    const label = clusterLabels.has(clusterId) ? 
+      clusterLabels.get(clusterId) : 
+      (keywords.length > 0 ? 
+        `${keywords.slice(0, 2).map(k => k.word).join(', ')} Research` : 
+        `Topic ${clusterId}`);
     
     return {
       id: clusterId,
       label: label,
       keywords: keywords,
       description: generateTopicDescription(keywords, clusterDocs.length),
-      representativeTerms: topKeywords
+      representativeTerms: keywords.slice(0, 3).map(k => k.word)
     };
   };
 
-  // EXTRACT DOCUMENT KEYWORDS
+  // IMPROVED DOCUMENT KEYWORDS EXTRACTION
   const extractDocumentKeywords = (text) => {
     const words = text.toLowerCase()
       .replace(/[^\w\s]/g, ' ')
@@ -447,24 +689,38 @@ const BertopicStyleDocumentClustering = () => {
       wordFreq[word] = (wordFreq[word] || 0) + 1;
     });
 
-    // Score and rank keywords
+    // Better scoring for distinguishing terms
     const keywordScores = Object.entries(wordFreq).map(([word, freq]) => {
       let score = freq;
       
-      // Boost academic terms
-      if (['research', 'analysis', 'study', 'method', 'algorithm', 'learning', 'system', 'approach', 'model', 'framework', 'data', 'information', 'technology', 'science'].some(term => word.includes(term))) {
-        score *= 2.0;
+      // BOOST technical/domain-specific terms
+      const technicalTerms = [
+        'neural', 'machine', 'deep', 'algorithm', 'optimization', 'learning',
+        'network', 'model', 'classification', 'regression', 'clustering',
+        'detection', 'prediction', 'framework', 'architecture', 'protocol',
+        'implementation', 'performance', 'scalability', 'distributed', 'system'
+      ];
+      
+      if (technicalTerms.some(term => word.includes(term))) {
+        score *= 3.0; // Much higher boost
       }
       
-      // Boost longer terms
-      if (word.length > 6) score *= 1.3;
+      // PENALIZE common academic terms
+      const commonTerms = ['research', 'study', 'analysis', 'paper', 'work', 'approach', 'method'];
+      if (commonTerms.some(term => word.includes(term))) {
+        score *= 0.3; // Significant penalty
+      }
+      
+      // Boost longer, more specific terms
+      if (word.length > 8) score *= 1.5;
+      if (word.length > 6) score *= 1.2;
       
       return { word, score, frequency: freq };
     });
 
     return keywordScores
       .sort((a, b) => b.score - a.score)
-      .slice(0, 8);
+      .slice(0, 12); // More keywords for better topic identification
   };
 
   // GENERATE TOPIC DESCRIPTION
@@ -1105,27 +1361,6 @@ Check browser console for detailed information.`;
     }
   };
 
-  // TEST FUNCTION - Add this for debugging
-  const testPDFProcessor = async () => {
-    console.log('🧪 Testing PDF Processor...');
-    console.log('Status:', window.getPyodideStatus());
-    console.log('processFileWithPython:', typeof window.processFileWithPython);
-    console.log('summarizeTextWithPython:', typeof window.summarizeTextWithPython);
-    
-    if (window.summarizeTextWithPython) {
-      try {
-        const testText = `This research presents a comprehensive analysis of document clustering techniques in modern information retrieval systems. The study investigates the effectiveness of various clustering algorithms when applied to large-scale document collections. Our methodology employs both traditional approaches and novel machine learning techniques to evaluate clustering performance. The experimental setup includes datasets from multiple domains including academic papers, news articles, and technical documentation. Results demonstrate that hybrid clustering approaches significantly outperform single-algorithm methods, achieving up to 15% improvement in clustering accuracy. The findings suggest that combining semantic similarity measures with traditional tf-idf vectorization provides optimal clustering results. Furthermore, the research reveals important insights about scalability challenges in real-world applications. These results have significant implications for information retrieval systems and recommend specific implementation strategies for practical deployment.`;
-        
-        const testSummary = await window.summarizeTextWithPython(testText, 10);
-        console.log('✅ Test abstract-style summarization result:');
-        console.log(testSummary);
-        console.log(`📊 Original: ${testText.length} chars, Summary: ${testSummary.length} chars`);
-      } catch (error) {
-        console.error('❌ Test summarization failed:', error);
-      }
-    }
-  };
-
   const statusInfo = getPyodideStatusInfo();
 
   return (
@@ -1135,7 +1370,7 @@ Check browser console for detailed information.`;
           🐍 Global PDF Processor + Document Clustering
         </h1>
         <p style={{ fontSize: '1.1rem', color: '#6b7280', marginBottom: '8px' }}>
-          Global PDF Processing + Lightweight Text Analysis + BERTopic-Inspired Clustering
+          Global PDF Processing + Enhanced Text Analysis + BERTopic-Inspired Clustering
         </p>
         <div style={{ 
           display: 'inline-flex', 
@@ -1201,24 +1436,8 @@ Check browser console for detailed information.`;
                 fontWeight: '500'
               }}
             >
-              {isProcessing ? '🐍 Processing...' : pyodideStatus.ready ? '🚀 Python Analysis' : '⚡ Basic Analysis'}
+              {isProcessing ? '🐍 Processing...' : pyodideStatus.ready ? '🚀 Enhanced Analysis' : '⚡ Basic Analysis'}
             </button>
-            {pyodideStatus.ready && (
-              <button
-                onClick={testPDFProcessor}
-                style={{
-                  padding: '12px 20px',
-                  backgroundColor: '#6366f1',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500'
-                }}
-              >
-                🧪 Test PDF Processor
-              </button>
-            )}
           </div>
 
           {selectedFiles.length > 0 && (
@@ -1315,7 +1534,7 @@ Check browser console for detailed information.`;
         {/* Visualization Section */}
         <div style={{ background: 'white', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1f2937', marginBottom: '20px' }}>
-            🎯 Topic Clusters
+            🎯 Enhanced Topic Clusters
           </h2>
           
           {clustering ? (
@@ -1332,19 +1551,22 @@ Check browser console for detailed information.`;
             }}>
               <div style={{ fontSize: '4rem', marginBottom: '20px' }}>🐍</div>
               <p style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>
-                Upload documents for Global PDF processing
+                Upload documents for enhanced topic clustering
               </p>
               <p style={{ fontSize: '0.9rem', marginBottom: '6px' }}>
                 🐍 PyPDF2 for reliable PDF text extraction
               </p>
               <p style={{ fontSize: '0.9rem', marginBottom: '6px' }}>
-                📝 Python-powered text summarization
+                📝 Enhanced summarization with technical focus
               </p>
               <p style={{ fontSize: '0.9rem', marginBottom: '6px' }}>
-                🎯 BERTopic-inspired clustering pipeline
+                🎯 Stricter clustering for better topic separation
+              </p>
+              <p style={{ fontSize: '0.9rem', marginBottom: '6px' }}>
+                🏷️ C-TF-IDF cluster labeling (like your hdb2.py)
               </p>
               <p style={{ fontSize: '0.9rem' }}>
-                🏷️ C-TF-IDF automatic topic labeling
+                🎯 Content-adaptive outlier classification
               </p>
             </div>
           )}
@@ -1470,7 +1692,7 @@ Check browser console for detailed information.`;
                         fontSize: '0.75rem',
                         fontWeight: '600'
                       }}>
-                        {doc.metadata.processingMethod === 'python_pypdf2' ? '🐍 Global Python' : '⚡ Basic'}
+                        {doc.metadata.processingMethod === 'python_pypdf2' ? '🐍 Enhanced' : '⚡ Basic'}
                       </div>
                     )}
                   </div>
@@ -1479,7 +1701,7 @@ Check browser console for detailed information.`;
                 {doc.summary && (
                   <div style={{ marginBottom: '12px' }}>
                     <div style={{ fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '6px' }}>
-                      📝 {doc.metadata?.processingMethod === 'python_pypdf2' ? 'Python' : 'Basic'} Summary:
+                      📝 {doc.metadata?.processingMethod === 'python_pypdf2' ? 'Enhanced' : 'Basic'} Summary:
                     </div>
                     <div style={{ fontSize: '0.9rem', color: '#4b5563', lineHeight: '1.5', fontStyle: 'italic' }}>
                       {doc.summary.length > 200 ? doc.summary.substring(0, 200) + "..." : doc.summary}
@@ -1533,7 +1755,7 @@ Check browser console for detailed information.`;
               border: '2px solid #bae6fd'
             }}>
               <h4 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#0c4a6e', marginBottom: '12px' }}>
-                📊 Topic Analysis Summary
+                📊 Enhanced Topic Analysis Summary
               </h4>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
                 <div>
@@ -1558,7 +1780,7 @@ Check browser console for detailed information.`;
                 <div>
                   <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#374151' }}>Processing:</div>
                   <div style={{ fontSize: '1rem', color: '#0c4a6e', fontWeight: '600' }}>
-                    {pyodideStatus.ready ? '🐍 Global Python' : '⚡ Basic Analysis'}
+                    {pyodideStatus.ready ? '🐍 Enhanced Analysis' : '⚡ Basic Analysis'}
                   </div>
                 </div>
               </div>
@@ -1575,7 +1797,7 @@ Check browser console for detailed information.`;
         boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
       }}>
         <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1f2937', marginBottom: '20px' }}>
-          🧠 Global PDF Processing Pipeline
+          🧠 Enhanced Global PDF Processing Pipeline
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
           <div>
@@ -1591,24 +1813,24 @@ Check browser console for detailed information.`;
           </div>
           <div>
             <h4 style={{ fontSize: '1.1rem', fontWeight: '600', color: '#1f2937', marginBottom: '8px' }}>
-              📄 PDF Processing:
+              📄 Enhanced Processing:
             </h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#4b5563' }}>
-              <li style={{ marginBottom: '4px' }}>• Page-by-page text extraction</li>
-              <li style={{ marginBottom: '4px' }}>• Clean text normalization</li>
-              <li style={{ marginBottom: '4px' }}>• Keyword extraction & scoring</li>
-              <li style={{ marginBottom: '4px' }}>• Extractive summarization</li>
+              <li style={{ marginBottom: '4px' }}>• Technical term focused summarization</li>
+              <li style={{ marginBottom: '4px' }}>• Domain-aware keyword extraction</li>
+              <li style={{ marginBottom: '4px' }}>• Larger vocabulary embeddings (1500+)</li>
+              <li style={{ marginBottom: '4px' }}>• Stricter clustering parameters</li>
             </ul>
           </div>
           <div>
             <h4 style={{ fontSize: '1.1rem', fontWeight: '600', color: '#1f2937', marginBottom: '8px' }}>
-              🎯 Clustering:
+              🎯 Better Topic Separation:
             </h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#4b5563' }}>
-              <li style={{ marginBottom: '4px' }}>• Lightweight embeddings</li>
-              <li style={{ marginBottom: '4px' }}>• DBSCAN-inspired clustering</li>
-              <li style={{ marginBottom: '4px' }}>• C-TF-IDF topic labeling</li>
-              <li style={{ marginBottom: '4px' }}>• Interactive visualization</li>
+              <li style={{ marginBottom: '4px' }}>• Penalizes generic academic terms</li>
+              <li style={{ marginBottom: '4px' }}>• Boosts technical/domain keywords</li>
+              <li style={{ marginBottom: '4px' }}>• Stricter distance thresholds</li>
+              <li style={{ marginBottom: '4px' }}>• C-TF-IDF inspired cluster labeling</li>
             </ul>
           </div>
         </div>
@@ -1621,9 +1843,9 @@ Check browser console for detailed information.`;
           border: '1px solid #bae6fd'
         }}>
           <p style={{ margin: 0, color: '#0c4a6e', fontWeight: '500' }}>
-            🚀 <strong>Global & Reliable:</strong> This implementation uses a global Pyodide instance 
-            loaded once in index.html, making PDF processing available to all React components. 
-            Perfect for document analysis applications requiring consistent PDF text extraction!
+            🚀 <strong>Enhanced & Adaptive:</strong> This improved version uses stricter clustering parameters 
+            and adaptive text processing to create diverse, meaningful topic clusters. Works with any document 
+            type - academic papers, business reports, legal documents, technical manuals, and more!
           </p>
         </div>
       </div>
